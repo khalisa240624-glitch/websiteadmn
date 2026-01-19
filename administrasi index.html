@@ -1,0 +1,322 @@
+<?php
+session_start();
+// Koneksi Database
+ $conn = mysqli_connect("localhost", "root", "", "admin_guru");
+
+if (!$conn) {
+    die("Koneksi gagal: " . mysqli_connect_error());
+}
+
+ $page = isset($_GET['page']) ? $_GET['page'] : 'dashboard';
+
+// PROSES LOGIN
+if (isset($_POST['login'])) {
+    $username = $_POST['username'];
+    // Disarankan menggunakan password_hash() di real project, ini contoh sederhana
+    if ($_POST['password'] == 'Guru123') {
+        $_SESSION['login'] = $username;
+        header("Location: index.php?page=dashboard");
+        exit;
+    } else {
+        $error = "Password salah!";
+    }
+}
+
+// PROSES LOGOUT
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header("Location: index.php");
+    exit;
+}
+
+// PROSES SIMPAN DATA (Handle Input dari berbagai form)
+ $msg = "";
+if (isset($_SESSION['login'])) {
+    
+    // 1. Simpan Siswa
+    if (isset($_POST['simpan_siswa'])) {
+        $nama = mysqli_real_escape_string($conn, $_POST['nama']);
+        $kelas = mysqli_real_escape_string($conn, $_POST['kelas']);
+        // Menggunakan Prepared Statement untuk keamanan
+        $stmt = $conn->prepare("INSERT INTO siswa (nama, kelas) VALUES (?, ?)");
+        $stmt->bind_param("ss", $nama, $kelas);
+        if($stmt->execute()) $msg = "Data siswa berhasil disimpan!";
+        else $msg = "Gagal menyimpan: " . $conn->error;
+    }
+
+    // 2. Simpan Kelas
+    if (isset($_POST['simpan_kelas'])) {
+        $nama_kelas = mysqli_real_escape_string($conn, $_POST['nama_kelas']);
+        $stmt = $conn->prepare("INSERT INTO kelas (nama_kelas) VALUES (?)");
+        $stmt->bind_param("s", $nama_kelas);
+        if($stmt->execute()) $msg = "Kelas berhasil ditambahkan!";
+    }
+
+    // 3. Simpan Absensi
+    if (isset($_POST['simpan_absensi'])) {
+        $siswa_id = $_POST['siswa_id'];
+        $status = $_POST['status'];
+        $tanggal = date('Y-m-d'); // Mengambil tanggal hari ini
+        // Cek agar tidak absen 2x di hari yang sama (logika sederhana)
+        $stmt = $conn->prepare("INSERT INTO absensi (siswa_id, tanggal, status) VALUES (?, ?, ?)");
+        $stmt->bind_param("iss", $siswa_id, $tanggal, $status);
+        if($stmt->execute()) $msg = "Absensi berhasil dicatat!";
+    }
+
+    // 4. Simpan Jurnal
+    if (isset($_POST['simpan_jurnal'])) {
+        $mapel = mysqli_real_escape_string($conn, $_POST['mapel']);
+        $materi = mysqli_real_escape_string($conn, $_POST['materi']);
+        $catatan = mysqli_real_escape_string($conn, $_POST['catatan']);
+        $guru = $_SESSION['login'];
+        $stmt = $conn->prepare("INSERT INTO jurnal (guru, mapel, materi, catatan, tgl_jurnal) VALUES (?, ?, ?, ?, NOW())");
+        $stmt->bind_param("ssss", $guru, $mapel, $materi, $catatan);
+        if($stmt->execute()) $msg = "Jurnal berhasil disimpan!";
+    }
+
+    // 5. Simpan Penilaian
+    if (isset($_POST['simpan_penilaian'])) {
+        $siswa_id = $_POST['siswa_id'];
+        $jenis = mysqli_real_escape_string($conn, $_POST['jenis']);
+        $nilai = $_POST['nilai'];
+        $stmt = $conn->prepare("INSERT INTO penilaian (siswa_id, jenis, nilai) VALUES (?, ?, ?)");
+        $stmt->bind_param("isi", $siswa_id, $jenis, $nilai);
+        if($stmt->execute()) $msg = "Nilai berhasil disimpan!";
+    }
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Administrasi Guru</title>
+<style>
+    body { margin:0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#f4f4f4; color:#333; }
+    .sidebar { width:240px; height:100vh; position:fixed; background:#2c3e50; color:#ecf0f1; overflow-y:auto; }
+    .sidebar h3 { text-align:center; padding:20px 0; margin:0; background:#34495e; }
+    .sidebar a { display:block; padding:15px 20px; color:#bdc3c7; text-decoration:none; transition:0.3s; border-bottom:1px solid #34495e; }
+    .sidebar a:hover, .sidebar a.active { background:#e74c3c; color:#fff; padding-left:25px; }
+    .content { margin-left:240px; padding:30px; }
+    .card { background:#fff; padding:25px; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1); margin-bottom:20px; }
+    input, select, textarea { padding:10px; width:100%; margin:8px 0; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; }
+    button { padding:10px 20px; background:#e74c3c; color:#fff; border:none; border-radius:4px; cursor:pointer; width:auto; font-weight:bold; }
+    button:hover { background:#c0392b; }
+    table { width:100%; border-collapse:collapse; margin-top:15px; }
+    th, td { border:1px solid #ddd; padding:12px; text-align:left; }
+    th { background-color:#2c3e50; color:white; }
+    tr:nth-child(even) { background-color:#f9f9f9; }
+    .alert { padding:10px; background:#d4edda; color:#155724; margin-bottom:20px; border-radius:4px; border:1px solid #c3e6cb; }
+    
+    /* Login Styles */
+    .login-wrapper { display:flex; justify-content:center; align-items:center; height:100vh; background:#2c3e50; }
+    .login-box { width:350px; }
+    .login-box h2 { text-align:center; color:#2c3e50; }
+</style>
+</head>
+<body>
+
+<?php if (!isset($_SESSION['login'])) { ?>
+<!-- HALAMAN LOGIN -->
+<div class="login-wrapper">
+    <div class="card login-box">
+        <h2>LOGIN GURU</h2>
+        <?php if(isset($error)) echo "<p style='color:red; text-align:center;'>$error</p>"; ?>
+        <form method="post">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="password" name="password" placeholder="Password (Guru123)" required>
+            <button type="submit" name="login" style="width:100%">MASUK</button>
+        </form>
+    </div>
+</div>
+
+<?php } else { ?>
+<!-- DASHBOARD SYSTEM -->
+<div class="sidebar">
+    <h3>ADMIN GURU</h3>
+    <a href="?page=dashboard" class="<?= $page=='dashboard'?'active':'' ?>">Dashboard</a>
+    <a href="?page=siswa" class="<?= $page=='siswa'?'active':'' ?>">Data Siswa</a>
+    <a href="?page=kelas" class="<?= $page=='kelas'?'active':'' ?>">Kelas</a>
+    <a href="?page=absensi" class="<?= $page=='absensi'?'active':'' ?>">Kehadiran</a>
+    <a href="?page=jurnal" class="<?= $page=='jurnal'?'active':'' ?>">Jurnal Mengajar</a>
+    <a href="?page=penilaian" class="<?= $page=='penilaian'?'active':'' ?>">Penilaian</a>
+    <a href="?logout=true" style="margin-top:20px; background:#c0392b;">Logout</a>
+</div>
+
+<div class="content">
+    <h2>Halo, <?= htmlspecialchars($_SESSION['login']) ?></h2>
+    <hr style="border:0; border-top:1px solid #ddd; margin:20px 0;">
+    
+    <?php if($msg) echo "<div class='alert'>$msg</div>"; ?>
+
+    <?php if ($page == 'dashboard') { ?>
+        <div class="card">
+            <h3>Selamat datang di Sistem Administrasi Guru</h3>
+            <p>Silakan pilih menu di sebelah kiri untuk mengelola data siswa, absensi, jurnal, dan penilaian.</p>
+        </div>
+    <?php } ?>
+
+    <?php 
+    // ================= HALAMAN SISWA =================
+    elseif ($page == 'siswa') { 
+        $query_siswa = mysqli_query($conn, "SELECT * FROM siswa ORDER BY id DESC");
+    ?>
+    <div class="card">
+        <h3>Input Data Siswa</h3>
+        <form method="post">
+            <input type="text" name="nama" placeholder="Nama Lengkap Siswa" required>
+            <input type="text" name="kelas" placeholder="Kelas (contoh: X RPL 1)" required>
+            <button type="submit" name="simpan_siswa">Simpan Siswa</button>
+        </form>
+        
+        <h3>Daftar Siswa</h3>
+        <table>
+            <tr><th>ID</th><th>Nama</th><th>Kelas</th></tr>
+            <?php while($d=mysqli_fetch_array($query_siswa)){ ?>
+            <tr>
+                <td><?= $d['id'] ?></td>
+                <td><?= htmlspecialchars($d['nama']) ?></td>
+                <td><?= htmlspecialchars($d['kelas']) ?></td>
+            </tr>
+            <?php } ?>
+        </table>
+    </div>
+    <?php } ?>
+
+    <?php 
+    // ================= HALAMAN KELAS =================
+    elseif ($page == 'kelas') { 
+        $query_kelas = mysqli_query($conn, "SELECT * FROM kelas");
+    ?>
+    <div class="card">
+        <h3>Tambah Kelas</h3>
+        <form method="post">
+            <input type="text" name="nama_kelas" placeholder="Nama Kelas (misal: XII TKJ 2)" required>
+            <button type="submit" name="simpan_kelas">Tambah Kelas</button>
+        </form>
+
+        <h3>Data Kelas</h3>
+        <table>
+            <tr><th>ID</th><th>Nama Kelas</th></tr>
+            <?php while($k=mysqli_fetch_array($query_kelas)){ ?>
+            <tr><td><?= $k['id'] ?></td><td><?= htmlspecialchars($k['nama_kelas']) ?></td></tr>
+            <?php } ?>
+        </table>
+    </div>
+    <?php } ?>
+
+    <?php 
+    // ================= HALAMAN ABSENSI =================
+    elseif ($page == 'absensi') { 
+        $query_absensi = mysqli_query($conn, "SELECT absensi.*, siswa.nama, siswa.kelas FROM absensi JOIN siswa ON absensi.siswa_id = siswa.id ORDER BY absensi.id DESC");
+        // Ambil data siswa untuk dropdown
+        $list_siswa = mysqli_query($conn, "SELECT * FROM siswa");
+    ?>
+    <div class="card">
+        <h3>Input Kehadiran</h3>
+        <form method="post">
+            <label>Pilih Siswa:</label>
+            <select name="siswa_id" required>
+                <option value="">-- Pilih Siswa --</option>
+                <?php while($s=mysqli_fetch_array($list_siswa)){ ?>
+                    <option value="<?= $s['id'] ?>"><?= $s['nama'] ?> (<?= $s['kelas'] ?>)</option>
+                <?php } ?>
+            </select>
+            
+            <label>Status:</label>
+            <select name="status" required>
+                <option value="Hadir">Hadir</option>
+                <option value="Sakit">Sakit</option>
+                <option value="Izin">Izin</option>
+                <option value="Alpha">Alpha</option>
+            </select>
+            <button type="submit" name="simpan_absensi">Simpan Absensi</button>
+        </form>
+
+        <h3>Riwayat Absensi</h3>
+        <table>
+            <tr><th>Tanggal</th><th>Nama Siswa</th><th>Kelas</th><th>Status</th></tr>
+            <?php while($a=mysqli_fetch_array($query_absensi)){ ?>
+            <tr>
+                <td><?= $a['tanggal'] ?></td>
+                <td><?= htmlspecialchars($a['nama']) ?></td>
+                <td><?= htmlspecialchars($a['kelas']) ?></td>
+                <td>
+                    <span style="padding:2px 8px; border-radius:4px; background:<?= $a['status']=='Hadir'?'#2ecc71':'#e74c3c' ?>; color:white;">
+                    <?= $a['status'] ?>
+                    </span>
+                </td>
+            </tr>
+            <?php } ?>
+        </table>
+    </div>
+    <?php } ?>
+
+    <?php 
+    // ================= HALAMAN JURNAL =================
+    elseif ($page == 'jurnal') { 
+        $query_jurnal = mysqli_query($conn, "SELECT * FROM jurnal ORDER BY id DESC");
+    ?>
+    <div class="card">
+        <h3>Isi Jurnal Mengajar</h3>
+        <form method="post">
+            <input type="text" name="mapel" placeholder="Mata Pelajaran" required>
+            <input type="text" name="materi" placeholder="Materi Pokok" required>
+            <textarea name="catatan" rows="3" placeholder="Catatan Kejadian / Tugas..."></textarea>
+            <button type="submit" name="simpan_jurnal">Simpan Jurnal</button>
+        </form>
+
+        <h3>Riwayat Jurnal</h3>
+        <table>
+            <tr><th>Tanggal</th><th>Guru</th><th>Mapel</th><th>Materi</th><th>Catatan</th></tr>
+            <?php while($j=mysqli_fetch_array($query_jurnal)){ ?>
+            <tr>
+                <td><?= $j['tgl_jurnal'] ?></td>
+                <td><?= htmlspecialchars($j['guru']) ?></td>
+                <td><?= htmlspecialchars($j['mapel']) ?></td>
+                <td><?= htmlspecialchars($j['materi']) ?></td>
+                <td><?= htmlspecialchars($j['catatan']) ?></td>
+            </tr>
+            <?php } ?>
+        </table>
+    </div>
+    <?php } ?>
+
+    <?php 
+    // ================= HALAMAN PENILAIAN =================
+    elseif ($page == 'penilaian') { 
+        $query_nilai = mysqli_query($conn, "SELECT penilaian.*, siswa.nama FROM penilaian JOIN siswa ON penilaian.siswa_id = siswa.id ORDER BY penilaian.id DESC");
+        $list_siswa = mysqli_query($conn, "SELECT * FROM siswa");
+    ?>
+    <div class="card">
+        <h3>Input Penilaian</h3>
+        <form method="post">
+            <label>Pilih Siswa:</label>
+            <select name="siswa_id" required>
+                <option value="">-- Pilih Siswa --</option>
+                <?php while($s=mysqli_fetch_array($list_siswa)){ ?>
+                    <option value="<?= $s['id'] ?>"><?= $s['nama'] ?></option>
+                <?php } ?>
+            </select>
+            
+            <input type="text" name="jenis" placeholder="Jenis Nilai (UH/Tugas/PTS)" required>
+            <input type="number" name="nilai" placeholder="Nilai Angka (0-100)" min="0" max="100" required>
+            <button type="submit" name="simpan_penilaian">Simpan Nilai</button>
+        </form>
+
+        <h3>Daftar Penilaian</h3>
+        <table>
+            <tr><th>Nama Siswa</th><th>Jenis</th><th>Nilai</th></tr>
+            <?php while($n=mysqli_fetch_array($query_nilai)){ ?>
+            <tr>
+                <td><?= htmlspecialchars($n['nama']) ?></td>
+                <td><?= htmlspecialchars($n['jenis']) ?></td>
+                <td><?= $n['nilai'] ?></td>
+            </tr>
+            <?php } ?>
+        </table>
+    </div>
+    <?php } ?>
+
+</div>
+<?php } ?>
+</body>
+</html>
